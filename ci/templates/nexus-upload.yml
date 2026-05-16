@@ -1,0 +1,12 @@
+nexus_upload:
+  stage: publish
+  image: "${CI_RUNNER_JAVA_IMAGE:-registry.example.co.kr/scm-runners/maven:jdk21}"
+  tags:
+    - docker
+    - amd64
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      when: manual
+    - if: '$CI_COMMIT_TAG'
+  script:
+    - bash ci/scripts/nexus-upload.sh

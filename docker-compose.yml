@@ -1,0 +1,161 @@
+# GitLab EE Premium single-host deployment.
+# 요구사항: 단일 Host Docker 기반 SCM 운영, 외부 Nginx reverse proxy는 이미 존재.
+# 구현상세: GitLab HTTP와 Docs만 127.0.0.1에 바인딩하여 외부 노출은 Nginx가 담당한다.
+# 제약사항: amd64 전용 실행을 강제하고 SSH 포트는 publish하지 않는다.
+services:
+  gitlab:
+    image: ${GITLAB_IMAGE:-gitlab/gitlab-ee:18.11.3-ee.0}
+    container_name: ${GITLAB_CONTAINER_NAME:-gitlab-ee}
+    hostname: ${GITLAB_HOSTNAME:-gitlab.example.co.kr}
+    platform: linux/amd64
+    restart: unless-stopped
+    shm_size: "256m"
+    env_file:
+      # 구현상세: 운영에서는 .env를 사용하지만, 정적 검증은 .env.example만으로도 가능해야 한다.
+      - path: .env
+        required: false
+    environment:
+      # 요구사항: GitLab EE 최신 안정 패치 고정, Premium 기능만 사용.
+      # 구현상세: external_url은 외부 Nginx TLS URL이고 GitLab 내장 Nginx는 HTTP로만 listen한다.
+      GITLAB_OMNIBUS_CONFIG: |
+        external_url ENV.fetch('GITLAB_EXTERNAL_URL', 'https://gitlab.example.co.kr')
+
+        # 구현상세: 외부 Nginx가 TLS 종료를 담당하므로 컨테이너 내부는 HTTP 80만 사용한다.
+        nginx['listen_port'] = 80
+        nginx['listen_https'] = false
+        nginx['redirect_http_to_https'] = false
+        letsencrypt['enable'] = false
+
+        # 제약사항: Git SSH 서비스는 회사 정책상 미제공. 호스트 publish도 하지 않는다.
+        gitlab_rails['gitlab_shell_ssh_port'] = 22
+
+        # 구현상세: reverse proxy 원 IP 보존. TRUSTED_PROXY_CIDRS는 사내 Nginx/로드밸런서 CIDR만 지정한다.
+        gitlab_rails['trusted_proxies'] = ENV.fetch('TRUSTED_PROXY_CIDRS', '127.0.0.1/32').split(',').map(&:strip)
+        nginx['real_ip_trusted_addresses'] = ENV.fetch('TRUSTED_PROXY_CIDRS', '127.0.0.1/32').split(',').map(&:strip)
+        nginx['real_ip_header'] = 'X-Forwarded-For'
+        nginx['real_ip_recursive'] = 'on'
+        nginx['proxy_set_headers'] = {
+          'Host' => '$$http_host',
+          'X-Real-IP' => '$$remote_addr',
+          'X-Forwarded-For' => '$$proxy_add_x_forwarded_for',
+          'X-Forwarded-Proto' => 'https',
+          'X-Forwarded-Ssl' => 'on'
+        }
+
+        # 운영: Asia/Seoul 기준 로그/감사 추적과 백업 보존 기간을 명시한다.
+        gitlab_rails['time_zone'] = ENV.fetch('GITLAB_TIMEZONE', 'Asia/Seoul')
+        gitlab_rails['backup_path'] = '/var/opt/gitlab/backups'
+        gitlab_rails['backup_keep_time'] = ENV.fetch('GITLAB_BACKUP_KEEP_SECONDS', '1209600').to_i
+
+        # 운영: GitLab 내장 컨테이너 registry는 현재 Harbor 전환 예정이므로 기본 비활성화한다.
+        registry['enable'] = false
+
+        # 운영: SMTP는 사내 릴레이가 있을 때만 활성화한다. 비밀값은 .env로만 주입한다.
+        gitlab_rails['smtp_enable'] = ENV.fetch('SMTP_ENABLE', 'false') == 'true'
+        if gitlab_rails['smtp_enable']
+          gitlab_rails['smtp_address'] = ENV.fetch('SMTP_ADDRESS')
+          gitlab_rails['smtp_port'] = ENV.fetch('SMTP_PORT', '587').to_i
+          gitlab_rails['smtp_user_name'] = ENV['SMTP_USER_NAME']
+          gitlab_rails['smtp_password'] = ENV['SMTP_PASSWORD']
+          gitlab_rails['smtp_domain'] = ENV.fetch('SMTP_DOMAIN', ENV.fetch('GITLAB_HOSTNAME', 'gitlab.example.co.kr'))
+          gitlab_rails['smtp_authentication'] = ENV.fetch('SMTP_AUTHENTICATION', 'login')
+          gitlab_rails['smtp_enable_starttls_auto'] = ENV.fetch('SMTP_ENABLE_STARTTLS_AUTO', 'true') == 'true'
+          gitlab_rails['gitlab_email_from'] = ENV.fetch('GITLAB_EMAIL_FROM')
+          gitlab_rails['gitlab_email_reply_to'] = ENV.fetch('GITLAB_EMAIL_REPLY_TO', ENV.fetch('GITLAB_EMAIL_FROM'))
+        end
+
+        # 관측성: 컨테이너 로그는 Docker logging driver로 수집하고 GitLab JSON 로그는 /var/log/gitlab에 보존한다.
+        logging['svlogd_size'] = ENV.fetch('GITLAB_LOG_ROTATE_SIZE', '200000000').to_i
+        logging['svlogd_num'] = ENV.fetch('GITLAB_LOG_ROTATE_NUM', '30').to_i
+    ports:
+      # 구현상세: 외부 Nginx만 접근해야 하므로 loopback에만 노출한다.
+      - "${GITLAB_HTTP_BIND:-127.0.0.1}:${GITLAB_HTTP_PORT:-8080}:80"
+    volumes:
+      # 운영: Disk 증설/백업/장애복구 편의를 위해 config, logs, data, backups를 명확히 분리한다.
+      - ${GITLAB_HOME:-/srv/gitlab-ee}/config:/etc/gitlab
+      - ${GITLAB_HOME:-/srv/gitlab-ee}/logs:/var/log/gitlab
+      - ${GITLAB_HOME:-/srv/gitlab-ee}/data:/var/opt/gitlab
+      - ${GITLAB_HOME:-/srv/gitlab-ee}/backups:/var/opt/gitlab/backups
+      - ./scripts/gitlab-rails:/opt/gitlab-bootstrap:ro
+      - ./config/password-expiration-exceptions.yml:/opt/gitlab-bootstrap/password-expiration-exceptions.yml:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://127.0.0.1/-/health >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 20
+      start_period: 180s
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "10"
+
+  gitlab-docs:
+    image: ${GITLAB_DOCS_IMAGE:-registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/archives:18.11}
+    container_name: ${GITLAB_DOCS_CONTAINER_NAME:-gitlab-docs}
+    hostname: ${GITLAB_DOCS_HOSTNAME:-gitlab-docs.example.co.kr}
+    platform: linux/amd64
+    restart: unless-stopped
+    ports:
+      # 구현상세: GitLab /help 리다이렉트 대상. 외부 공개는 사내 Nginx에서 TLS로 처리한다.
+      - "${GITLAB_DOCS_BIND:-127.0.0.1}:${GITLAB_DOCS_PORT:-4000}:4000"
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  gitlab-runner-docker:
+    image: ${GITLAB_RUNNER_IMAGE:-gitlab/gitlab-runner:alpine-v18.11.2}
+    container_name: ${GITLAB_RUNNER_DOCKER_CONTAINER_NAME:-gitlab-runner-docker}
+    platform: linux/amd64
+    restart: unless-stopped
+    depends_on:
+      gitlab:
+        condition: service_healthy
+    volumes:
+      # 구현상세: Docker executor 사용. Docker socket은 강한 권한이므로 protected runner와 allowed_images로 통제한다.
+      - ${RUNNER_DOCKER_CONFIG_HOME:-./runtime/gitlab-runner/docker}:/etc/gitlab-runner
+      - ${RUNNER_CACHE_HOME:-./runtime/gitlab-runner/cache}:/cache
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runner/templates:/runner-templates:ro
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "gitlab-runner --version >/dev/null || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  gitlab-runner-shell:
+    image: ${GITLAB_RUNNER_IMAGE:-gitlab/gitlab-runner:alpine-v18.11.2}
+    container_name: ${GITLAB_RUNNER_SHELL_CONTAINER_NAME:-gitlab-runner-shell}
+    platform: linux/amd64
+    restart: unless-stopped
+    depends_on:
+      gitlab:
+        condition: service_healthy
+    volumes:
+      # 구현상세: CodeRay 6.0 RG CLI 등 사내 도구는 read-only mount로 제한한다.
+      - ${RUNNER_SHELL_CONFIG_HOME:-./runtime/gitlab-runner/shell}:/etc/gitlab-runner
+      - ${RUNNER_SHELL_BUILDS_HOME:-./runtime/gitlab-runner/shell-builds}:/builds
+      - ${RUNNER_CACHE_HOME:-./runtime/gitlab-runner/cache}:/cache
+      - ${CODERAY_CLI_DIR:-./vendor/coderay}:/opt/coderay:ro
+      - ./runner/templates:/runner-templates:ro
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "gitlab-runner --version >/dev/null || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"

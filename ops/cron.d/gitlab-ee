@@ -1,0 +1,12 @@
+# /etc/cron.d/gitlab-ee 예시. 운영 표준 스케줄러에 맞춰 경로를 조정한다.
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# 운영: 매일 02:10 GitLab 백업.
+10 2 * * * root cd /opt/gitlab-ee && ./scripts/backup.sh >> /var/log/gitlab-ee-backup.log 2>&1
+
+# 운영: 매일 03:10 90일 비밀번호 만료 기준선 보정.
+10 3 * * * root cd /opt/gitlab-ee && ./scripts/expire-passwords.sh >> /var/log/gitlab-ee-password-expire.log 2>&1
+
+# 보안: 매주 일요일 04:10 이미지 취약점 스캔.
+10 4 * * 0 root cd /opt/gitlab-ee && ./scripts/scan-images.sh >> /var/log/gitlab-ee-image-scan.log 2>&1

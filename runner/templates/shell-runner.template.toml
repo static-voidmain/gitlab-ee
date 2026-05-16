@@ -1,0 +1,12 @@
+concurrent = 1
+check_interval = 3
+shutdown_timeout = 30
+
+[[runners]]
+  output_limit = 8192
+  limit = 1
+  request_concurrency = 1
+  executor = "shell"
+  shell = "bash"
+  builds_dir = "/builds"
+  cache_dir = "/cache"

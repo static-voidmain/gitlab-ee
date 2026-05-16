@@ -1,0 +1,17 @@
+checkstyle:
+  stage: lint
+  image: "${CI_RUNNER_JAVA_IMAGE:-registry.example.co.kr/scm-runners/maven:jdk21}"
+  tags:
+    - docker
+    - amd64
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+  script:
+    - bash ci/scripts/checkstyle.sh
+  artifacts:
+    when: always
+    expire_in: 30 days
+    paths:
+      - target/checkstyle-result.xml
+      - checkstyle-summary.txt

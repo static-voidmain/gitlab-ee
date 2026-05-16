@@ -1,0 +1,10 @@
+.env
+runtime/
+reports/
+*.log
+*.tmp
+.DS_Store
+vendor/coderay/*
+vendor/jdk7/*
+!vendor/coderay/.gitkeep
+!vendor/jdk7/.gitkeep

@@ -1,0 +1,8 @@
+[gitlab-nginx-git-http]
+enabled = true
+filter = gitlab-nginx-git-http
+logpath = /var/log/nginx/gitlab_access.log
+maxretry = 5
+findtime = 600
+bantime = 3600
+backend = auto

@@ -1,0 +1,106 @@
+# GitLab CI 표준 템플릿.
+# 요구사항: CodeRay SAST, Checkstyle, Coverage, Nexus 업로드, MR 댓글 갱신을 제공한다.
+# 제약사항: Ultimate 내장 SAST가 아니라 Premium + 사내 도구 조합으로 구현한다.
+
+stages:
+  - secure
+  - lint
+  - test
+  - package
+  - publish
+
+variables:
+  CI_RUNNER_JAVA_IMAGE: "registry.example.co.kr/scm-runners/maven:jdk21"
+  CHECKSTYLE_CONFIG: "ci/checkstyle/company-checkstyle.xml"
+  JACOCO_XML: "target/site/jacoco/jacoco.xml"
+  MAVEN_CLI_OPTS: "-B -ntp"
+
+coderay_sast:
+  stage: secure
+  tags:
+    - secure-shell
+    - coderay
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+  script:
+    - bash ci/scripts/coderay-sast.sh
+  artifacts:
+    when: always
+    expire_in: 30 days
+    paths:
+      - coderay-summary.txt
+
+checkstyle:
+  stage: lint
+  image: "$CI_RUNNER_JAVA_IMAGE"
+  tags:
+    - docker
+    - amd64
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+  script:
+    - bash ci/scripts/checkstyle.sh
+  artifacts:
+    when: always
+    expire_in: 30 days
+    paths:
+      - target/checkstyle-result.xml
+      - checkstyle-summary.txt
+
+coverage:
+  stage: test
+  image: "$CI_RUNNER_JAVA_IMAGE"
+  tags:
+    - docker
+    - amd64
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+  script:
+    - bash ci/scripts/coverage-comment.sh
+  coverage: '/Total coverage:\s+([0-9]+(?:\.[0-9]+)?)%/'
+  artifacts:
+    when: always
+    expire_in: 30 days
+    paths:
+      - coverage-summary.txt
+      - target/site/jacoco/
+    reports:
+      coverage_report:
+        coverage_format: jacoco
+        path: target/site/jacoco/jacoco.xml
+
+package:
+  stage: package
+  image: "$CI_RUNNER_JAVA_IMAGE"
+  tags:
+    - docker
+    - amd64
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$CI_COMMIT_TAG'
+  script:
+    - mvn $MAVEN_CLI_OPTS -DskipTests package
+  artifacts:
+    expire_in: 14 days
+    paths:
+      - target/*.jar
+      - target/*.war
+
+nexus_upload:
+  stage: publish
+  image: "$CI_RUNNER_JAVA_IMAGE"
+  tags:
+    - docker
+    - amd64
+  needs:
+    - job: package
+      artifacts: true
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      when: manual
+    - if: '$CI_COMMIT_TAG'
+  script:
+    - bash ci/scripts/nexus-upload.sh
