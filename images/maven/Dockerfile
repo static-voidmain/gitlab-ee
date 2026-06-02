@@ -7,7 +7,7 @@ USER root
 RUN set -eux; \
     if command -v apt-get >/dev/null 2>&1; then \
       apt-get update; \
-      apt-get install -y --no-install-recommends bash ca-certificates curl git tzdata jq; \
+      apt-get install -y --no-install-recommends bash ca-certificates curl jq; \
       rm -rf /var/lib/apt/lists/*; \
     fi; \
     groupadd --gid 10001 ci || true; \

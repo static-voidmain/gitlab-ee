@@ -31,6 +31,29 @@ fi
 
 echo "Static checks passed."
 
+if ! grep -q "rack_attack_git_basic_auth" docker-compose.yml; then
+  echo "ERROR: GitLab native Git/Registry authentication ban is not configured." >&2
+  exit 1
+fi
+
+if grep -Eq '^[[:space:]]*enabled[[:space:]]*=[[:space:]]*true' ops/fail2ban/jail.d/gitlab-nginx-git-http.local; then
+  echo "ERROR: Unsafe Git HTTP 401 Fail2Ban rule must remain disabled." >&2
+  exit 1
+fi
+
+if ! grep -Eq '^concurrent[[:space:]]*=[[:space:]]*10$' runner/templates/docker-runner.template.toml ||
+  ! grep -Eq '^[[:space:]]*limit[[:space:]]*=[[:space:]]*10$' runner/templates/docker-runner.template.toml; then
+  echo "ERROR: Docker runner must allow 10 concurrent jobs." >&2
+  exit 1
+fi
+
+if grep -q 'Type = "s3"' runner/templates/docker-runner.template.toml; then
+  echo "ERROR: Incomplete S3 cache configuration must not be enabled." >&2
+  exit 1
+fi
+
+echo "Security configuration checks passed."
+
 if [[ "${static_only}" == true ]]; then
   exit 0
 fi

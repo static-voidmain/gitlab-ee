@@ -9,15 +9,35 @@ exceptions_path = ENV.fetch('PASSWORD_EXCEPTION_FILE', '/opt/gitlab-bootstrap/pa
 now = Time.current
 next_expiration = days.days.from_now
 
+abort 'PASSWORD_EXPIRE_DAYS must be between 1 and 90' unless days.between?(1, 90)
+
 raw_exceptions = File.exist?(exceptions_path) ? YAML.safe_load(File.read(exceptions_path), permitted_classes: [Date]) : {}
 exceptions = Array(raw_exceptions && raw_exceptions['exceptions'])
-exception_usernames = exceptions.filter_map do |entry|
-  next unless entry.is_a?(Hash)
+exception_usernames = []
+expired_exceptions = []
+required_exception_fields = %w[username reason owner ticket expires_on].freeze
 
-  expires_on = entry['expires_on']
-  next if expires_on && Date.parse(expires_on.to_s) < Date.current
+exceptions.each_with_index do |entry, index|
+  abort "Exception entry #{index} must be a mapping" unless entry.is_a?(Hash)
 
-  entry['username'].to_s
+  missing_fields = required_exception_fields.select { |field| entry[field].to_s.strip.empty? }
+  abort "Exception entry #{index} is missing: #{missing_fields.join(', ')}" unless missing_fields.empty?
+
+  begin
+    expires_on = Date.iso8601(entry.fetch('expires_on').to_s)
+  rescue Date::Error
+    abort "Exception entry #{index} has an invalid expires_on date"
+  end
+
+  username = entry.fetch('username').to_s
+  if expires_on < Date.current
+    expired_exceptions << { username: username, expires_on: expires_on.iso8601 }
+    next
+  end
+
+  abort "Duplicate password expiration exception: #{username}" if exception_usernames.include?(username)
+
+  exception_usernames << username
 end
 
 scope = User.active.where(user_type: nil)
@@ -53,6 +73,8 @@ end
 puts JSON.pretty_generate(
   status: 'ok',
   policy_days: days,
+  expired_exception_count: expired_exceptions.length,
+  expired_exceptions: expired_exceptions,
   updated_count: updated.length,
   skipped_count: skipped.length,
   updated: updated,

@@ -11,13 +11,23 @@ for name in NEXUS_URL NEXUS_USERNAME NEXUS_PASSWORD; do
   fi
 done
 
-deploy_env="${DEPLOY_ENV:-${CI_ENVIRONMENT_NAME:-dev}}"
+deploy_env="${DEPLOY_ENV:-${CI_ENVIRONMENT_NAME:-}}"
+if [[ -z "${deploy_env}" ]]; then
+  echo "ERROR: DEPLOY_ENV or CI_ENVIRONMENT_NAME is required." >&2
+  exit 1
+fi
+
 case "${deploy_env}" in
   dev|develop|development) nexus_repo="${NEXUS_DEV_REPOSITORY:-maven-dev}" ;;
   stg|stage|staging|qa) nexus_repo="${NEXUS_STG_REPOSITORY:-maven-stg}" ;;
   prd|prod|production) nexus_repo="${NEXUS_PRD_REPOSITORY:-maven-prd}" ;;
-  *) nexus_repo="${NEXUS_REPOSITORY:-maven-dev}" ;;
+  *) echo "ERROR: Unsupported DEPLOY_ENV: ${deploy_env}" >&2; exit 1 ;;
 esac
+
+if [[ "${deploy_env}" =~ ^(prd|prod|production)$ && -z "${CI_COMMIT_TAG:-}" ]]; then
+  echo "ERROR: Production uploads require a Git tag pipeline." >&2
+  exit 1
+fi
 
 mapfile -t artifacts < <(find target -maxdepth 2 -type f \( -name '*.jar' -o -name '*.war' \) \
   ! -name '*-sources.jar' ! -name '*-javadoc.jar' | sort)
@@ -35,8 +45,8 @@ cat >"${settings_file}" <<XML
   <servers>
     <server>
       <id>nexus</id>
-      <username>${NEXUS_USERNAME}</username>
-      <password>${NEXUS_PASSWORD}</password>
+      <username>\${env.NEXUS_USERNAME}</username>
+      <password>\${env.NEXUS_PASSWORD}</password>
     </server>
   </servers>
 </settings>

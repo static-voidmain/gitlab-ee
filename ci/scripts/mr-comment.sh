@@ -8,6 +8,11 @@ comment_type="${1:?comment type is required}"
 summary_file="${2:?summary file path is required}"
 title="${3:-GitLab Quality Report}"
 
+if [[ ! "${comment_type}" =~ ^[a-z0-9_-]+$ ]]; then
+  echo "ERROR: Comment type may contain only lowercase letters, numbers, underscores, and hyphens." >&2
+  exit 1
+fi
+
 if [[ -z "${CI_MERGE_REQUEST_IID:-}" ]]; then
   echo "No merge request context. Skipping MR comment."
   exit 0
@@ -37,19 +42,32 @@ mr_iid="${CI_MERGE_REQUEST_IID:?CI_MERGE_REQUEST_IID is required}"
 marker="<!-- gitlab-ee-secure-bootstrap:${comment_type} -->"
 max_bytes="${MR_COMMENT_MAX_BYTES:-60000}"
 
+if [[ ! "${max_bytes}" =~ ^[1-9][0-9]*$ || "${max_bytes}" -gt 1000000 ]]; then
+  echo "ERROR: MR_COMMENT_MAX_BYTES must be an integer between 1 and 1000000." >&2
+  exit 1
+fi
+
+if [[ ! "${token}" =~ ^[a-zA-Z0-9_.-]+$ ]]; then
+  echo "ERROR: GITLAB_MR_COMMENT_TOKEN contains unsupported characters." >&2
+  exit 1
+fi
+
 summary="$(head -c "${max_bytes}" "${summary_file}")"
+indented_summary="$(sed 's/^/    /' <<<"${summary}")"
 body="${marker}
 
 ### ${title}
 
-\`\`\`text
-${summary}
-\`\`\`"
+${indented_summary}"
 
 notes_url="${api}/projects/${project_id}/merge_requests/${mr_iid}/notes"
+curl_config="$(mktemp)"
+trap 'rm -f "${curl_config}"' EXIT
+chmod 600 "${curl_config}"
+printf 'header = "PRIVATE-TOKEN: %s"\n' "${token}" >"${curl_config}"
 
 existing_notes="$(curl --fail --silent --show-error \
-  --header "PRIVATE-TOKEN: ${token}" \
+  --config "${curl_config}" \
   "${notes_url}?per_page=100")"
 
 jq -r --arg marker "${marker}" '.[] | select(.body | contains($marker)) | .id' <<<"${existing_notes}" |
@@ -57,16 +75,16 @@ while read -r note_id; do
   [[ -z "${note_id}" ]] && continue
   curl --fail --silent --show-error \
     --request DELETE \
-    --header "PRIVATE-TOKEN: ${token}" \
+    --config "${curl_config}" \
     "${notes_url}/${note_id}" >/dev/null
 done
 
 payload="$(jq -n --arg body "${body}" '{body: $body}')"
 curl --fail --silent --show-error \
   --request POST \
-  --header "PRIVATE-TOKEN: ${token}" \
+  --config "${curl_config}" \
   --header "Content-Type: application/json" \
-  --data "${payload}" \
-  "${notes_url}" >/dev/null
+  --data-binary @- \
+  "${notes_url}" <<<"${payload}" >/dev/null
 
 echo "MR comment updated: ${comment_type}"

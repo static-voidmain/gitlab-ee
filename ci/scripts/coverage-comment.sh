@@ -7,9 +7,10 @@ set -Eeuo pipefail
 jacoco_xml="${JACOCO_XML:-target/site/jacoco/jacoco.xml}"
 summary_file="${COVERAGE_SUMMARY_FILE:-coverage-summary.txt}"
 maven_opts="${MAVEN_CLI_OPTS:--B -ntp}"
+read -r -a maven_cli_opts <<<"${maven_opts}"
 
 if [[ -f pom.xml ]]; then
-  mvn ${maven_opts} test jacoco:report
+  mvn "${maven_cli_opts[@]}" test jacoco:report
 fi
 
 if [[ ! -f "${jacoco_xml}" ]]; then

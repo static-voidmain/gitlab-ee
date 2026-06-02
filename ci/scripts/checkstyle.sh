@@ -8,6 +8,7 @@ config="${CHECKSTYLE_CONFIG:-ci/checkstyle/company-checkstyle.xml}"
 summary_file="${CHECKSTYLE_SUMMARY_FILE:-checkstyle-summary.txt}"
 result_file="${CHECKSTYLE_RESULT_FILE:-target/checkstyle-result.xml}"
 maven_opts="${MAVEN_CLI_OPTS:--B -ntp}"
+read -r -a maven_cli_opts <<<"${maven_opts}"
 
 if [[ ! -f "${config}" ]]; then
   echo "ERROR: Checkstyle config not found: ${config}" >&2
@@ -17,7 +18,7 @@ fi
 mkdir -p "$(dirname "${result_file}")"
 
 if [[ -f pom.xml ]]; then
-  mvn ${maven_opts} \
+  mvn "${maven_cli_opts[@]}" \
     -Dcheckstyle.config.location="${config}" \
     -Dcheckstyle.output.file="${result_file}" \
     checkstyle:checkstyle

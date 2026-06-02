@@ -7,11 +7,13 @@ USER root
 RUN set -eux; \
     if command -v apt-get >/dev/null 2>&1; then \
       apt-get update; \
-      apt-get install -y --no-install-recommends bash ca-certificates curl git tzdata; \
+      apt-get install -y --no-install-recommends bash ca-certificates; \
       rm -rf /var/lib/apt/lists/*; \
     fi; \
     groupadd --gid 10001 ci || true; \
-    useradd --uid 10001 --gid 10001 --create-home --shell /bin/bash ci || true
+    useradd --uid 10001 --gid 10001 --create-home --shell /bin/bash ci || true; \
+    mkdir -p /workspace; \
+    chown -R 10001:10001 /workspace
 
 USER 10001:10001
 WORKDIR /workspace

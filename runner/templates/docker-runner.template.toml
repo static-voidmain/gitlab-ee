@@ -1,14 +1,15 @@
-concurrent = 4
+concurrent = 10
 check_interval = 3
 shutdown_timeout = 30
 
 [[runners]]
+  url = "${GITLAB_EXTERNAL_URL}"
+  token = "${RUNNER_DOCKER_AUTH_TOKEN}"
+  executor = "docker"
   output_limit = 8192
-  limit = 2
-  request_concurrency = 2
-  [runners.cache]
-    Type = "s3"
-    Shared = false
+  limit = 10
+  request_concurrency = 5
+  cache_dir = "/cache"
   [runners.docker]
     tls_verify = false
     image = "registry.example.co.kr/scm-runners/jdk:21"
@@ -18,13 +19,10 @@ shutdown_timeout = 30
     disable_cache = false
     volumes = ["/cache"]
     shm_size = 0
-    pull_policy = ["if-not-present", "always"]
+    pull_policy = "always"
+    allowed_pull_policies = ["always"]
     allowed_images = [
-      "registry.example.co.kr/scm-runners/*:*",
-      "eclipse-temurin:*",
-      "maven:*",
-      "gradle:*",
-      "node:*"
+      "registry.example.co.kr/scm-runners/*:*"
     ]
     allowed_services = []
     cap_drop = ["ALL"]

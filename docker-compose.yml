@@ -4,7 +4,7 @@
 # 제약사항: amd64 전용 실행을 강제하고 SSH 포트는 publish하지 않는다.
 services:
   gitlab:
-    image: ${GITLAB_IMAGE:-gitlab/gitlab-ee:18.11.3-ee.0}
+    image: ${GITLAB_IMAGE:-gitlab/gitlab-ee:19.0.0-ee.0}
     container_name: ${GITLAB_CONTAINER_NAME:-gitlab-ee}
     hostname: ${GITLAB_HOSTNAME:-gitlab.example.co.kr}
     platform: linux/amd64
@@ -40,6 +40,21 @@ services:
           'X-Forwarded-For' => '$$proxy_add_x_forwarded_for',
           'X-Forwarded-Proto' => 'https',
           'X-Forwarded-Ssl' => 'on'
+        }
+
+        # 보안: Git/Registry 인증 실패는 access log의 401 추정이 아니라 GitLab 내장 Rack Attack으로 차단한다.
+        # 구현상세: 정상 Git HTTP 요청도 최초 401을 발생시키므로 외부 Fail2Ban 401 규칙은 사용하지 않는다.
+        git_basic_auth_ban_integer = lambda do |name, default|
+          value = Integer(ENV.fetch(name, default), 10)
+          raise "#{name} must be greater than zero" unless value.positive?
+          value
+        end
+        gitlab_rails['rack_attack_git_basic_auth'] = {
+          'enabled' => ENV.fetch('GIT_BASIC_AUTH_BAN_ENABLED', 'true') == 'true',
+          'ip_whitelist' => ENV.fetch('GIT_BASIC_AUTH_BAN_IP_WHITELIST', '127.0.0.1').split(',').map(&:strip),
+          'maxretry' => git_basic_auth_ban_integer.call('GIT_BASIC_AUTH_BAN_MAX_RETRY', '5'),
+          'findtime' => git_basic_auth_ban_integer.call('GIT_BASIC_AUTH_BAN_FIND_TIME_SECONDS', '60'),
+          'bantime' => git_basic_auth_ban_integer.call('GIT_BASIC_AUTH_BAN_TIME_SECONDS', '3600')
         }
 
         # 운영: Asia/Seoul 기준 로그/감사 추적과 백업 보존 기간을 명시한다.
@@ -91,7 +106,7 @@ services:
         max-file: "10"
 
   gitlab-docs:
-    image: ${GITLAB_DOCS_IMAGE:-registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/archives:18.11}
+    image: ${GITLAB_DOCS_IMAGE:-registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/archives:19.0}
     container_name: ${GITLAB_DOCS_CONTAINER_NAME:-gitlab-docs}
     hostname: ${GITLAB_DOCS_HOSTNAME:-gitlab-docs.example.co.kr}
     platform: linux/amd64
@@ -106,7 +121,7 @@ services:
         max-file: "5"
 
   gitlab-runner-docker:
-    image: ${GITLAB_RUNNER_IMAGE:-gitlab/gitlab-runner:alpine-v18.11.2}
+    image: ${GITLAB_RUNNER_IMAGE:-gitlab/gitlab-runner:alpine-v19.0.0}
     container_name: ${GITLAB_RUNNER_DOCKER_CONTAINER_NAME:-gitlab-runner-docker}
     platform: linux/amd64
     restart: unless-stopped
@@ -133,7 +148,7 @@ services:
         max-file: "5"
 
   gitlab-runner-shell:
-    image: ${GITLAB_RUNNER_IMAGE:-gitlab/gitlab-runner:alpine-v18.11.2}
+    image: ${GITLAB_SHELL_RUNNER_IMAGE:-registry.example.co.kr/scm-runners/gitlab-runner-shell:19.0.0}
     container_name: ${GITLAB_RUNNER_SHELL_CONTAINER_NAME:-gitlab-runner-shell}
     platform: linux/amd64
     restart: unless-stopped
@@ -142,6 +157,7 @@ services:
         condition: service_healthy
     volumes:
       # 구현상세: CodeRay 6.0 RG CLI 등 사내 도구는 read-only mount로 제한한다.
+      # 제약사항: shell executor job은 이 컨테이너에서 직접 실행되므로 전용 이미지에 bash/curl/git/jq를 포함한다.
       - ${RUNNER_SHELL_CONFIG_HOME:-./runtime/gitlab-runner/shell}:/etc/gitlab-runner
       - ${RUNNER_SHELL_BUILDS_HOME:-./runtime/gitlab-runner/shell-builds}:/builds
       - ${RUNNER_CACHE_HOME:-./runtime/gitlab-runner/cache}:/cache

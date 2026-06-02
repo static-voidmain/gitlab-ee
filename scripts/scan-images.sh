@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# 테스트 통과: Docker 이미지의 CRITICAL/HIGH 취약점 결과를 도출한다.
-# 보안제약: 스캐너 자체는 digest-pinned 내부 registry 이미지만 허용한다.
+# 테스트 통과: docker scout quickview 요약과 Critical/High CVE 상세 결과를 도출한다.
+# 보안제약: amd64 결과만 검사하고 하나라도 Critical/High가 있으면 최종 실패한다.
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT_DIR}"
@@ -14,52 +14,105 @@ if [[ -f .env ]]; then
   set +a
 fi
 
-TRIVY_IMAGE_REF="${TRIVY_IMAGE_REF:-}"
-TRIVY_CACHE_DIR="${TRIVY_CACHE_DIR:-./runtime/trivy-cache}"
-TRIVY_REPORT_DIR="${TRIVY_REPORT_DIR:-./reports/trivy}"
+SCOUT_IMAGE_PREFIX="${SCOUT_IMAGE_PREFIX:-image://}"
+SCOUT_REPORT_DIR="${SCOUT_REPORT_DIR:-./reports/docker-scout}"
+include_legacy=false
+requested_images=()
 
-if [[ -z "${TRIVY_IMAGE_REF}" || "${TRIVY_IMAGE_REF}" != *@sha256:* || "${TRIVY_IMAGE_REF}" == *REPLACE_WITH_VERIFIED_DIGEST* ]]; then
-  echo "ERROR: TRIVY_IMAGE_REF must be a digest-pinned, internally verified scanner image." >&2
+for arg in "$@"; do
+  case "${arg}" in
+    --include-legacy) include_legacy=true ;;
+    --) ;;
+    -*) echo "ERROR: Unsupported option: ${arg}" >&2; exit 1 ;;
+    *) requested_images+=("${arg}") ;;
+  esac
+done
+
+case "${SCOUT_IMAGE_PREFIX}" in
+  image://|local://|registry://) ;;
+  *) echo "ERROR: SCOUT_IMAGE_PREFIX must be image://, local://, or registry://." >&2; exit 1 ;;
+esac
+
+if ! command -v docker >/dev/null 2>&1 || ! docker scout version >/dev/null 2>&1; then
+  echo "ERROR: Docker Scout CLI is required. Install Docker Scout and authenticate with docker login." >&2
   exit 1
 fi
 
-mkdir -p "${TRIVY_CACHE_DIR}" "${TRIVY_REPORT_DIR}"
-TRIVY_CACHE_DIR_ABS="$(cd "${TRIVY_CACHE_DIR}" && pwd)"
-TRIVY_REPORT_DIR_ABS="$(cd "${TRIVY_REPORT_DIR}" && pwd)"
+mkdir -p "${SCOUT_REPORT_DIR}"
+summary_report="${SCOUT_REPORT_DIR}/summary.tsv"
+: >"${summary_report}"
+printf 'image\tstatus\tquickview_report\tcve_report\n' >>"${summary_report}"
 
-images=(
-  "${GITLAB_IMAGE:-gitlab/gitlab-ee:18.11.3-ee.0}"
-  "${GITLAB_RUNNER_IMAGE:-gitlab/gitlab-runner:alpine-v18.11.2}"
-  "${GITLAB_DOCS_IMAGE:-registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/archives:18.11}"
-  "${INTERNAL_IMAGE_REGISTRY:-registry.example.co.kr/scm-runners}/jdk:8"
-  "${INTERNAL_IMAGE_REGISTRY:-registry.example.co.kr/scm-runners}/jdk:17"
-  "${INTERNAL_IMAGE_REGISTRY:-registry.example.co.kr/scm-runners}/jdk:21"
-  "${INTERNAL_IMAGE_REGISTRY:-registry.example.co.kr/scm-runners}/maven:jdk8"
-  "${INTERNAL_IMAGE_REGISTRY:-registry.example.co.kr/scm-runners}/maven:jdk17"
-  "${INTERNAL_IMAGE_REGISTRY:-registry.example.co.kr/scm-runners}/maven:jdk21"
-  "${INTERNAL_IMAGE_REGISTRY:-registry.example.co.kr/scm-runners}/gradle:jdk8"
-  "${INTERNAL_IMAGE_REGISTRY:-registry.example.co.kr/scm-runners}/gradle:jdk17"
-  "${INTERNAL_IMAGE_REGISTRY:-registry.example.co.kr/scm-runners}/gradle:jdk21"
-  "${INTERNAL_IMAGE_REGISTRY:-registry.example.co.kr/scm-runners}/node:24"
-  "${INTERNAL_IMAGE_REGISTRY:-registry.example.co.kr/scm-runners}/shell-tools:2026.05"
-)
+if [[ "${#requested_images[@]}" -gt 0 ]]; then
+  images=("${requested_images[@]}")
+else
+  images=(
+    "${GITLAB_IMAGE:-gitlab/gitlab-ee:19.0.0-ee.0}"
+    "${GITLAB_RUNNER_IMAGE:-gitlab/gitlab-runner:alpine-v19.0.0}"
+    "${GITLAB_DOCS_IMAGE:-registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/archives:19.0}"
+    "${GITLAB_SHELL_RUNNER_IMAGE:-registry.example.co.kr/scm-runners/gitlab-runner-shell:19.0.0}"
+    "${INTERNAL_IMAGE_REGISTRY:-registry.example.co.kr/scm-runners}/jdk:8"
+    "${INTERNAL_IMAGE_REGISTRY:-registry.example.co.kr/scm-runners}/jdk:17"
+    "${INTERNAL_IMAGE_REGISTRY:-registry.example.co.kr/scm-runners}/jdk:21"
+    "${INTERNAL_IMAGE_REGISTRY:-registry.example.co.kr/scm-runners}/maven:jdk8"
+    "${INTERNAL_IMAGE_REGISTRY:-registry.example.co.kr/scm-runners}/maven:jdk17"
+    "${INTERNAL_IMAGE_REGISTRY:-registry.example.co.kr/scm-runners}/maven:jdk21"
+    "${INTERNAL_IMAGE_REGISTRY:-registry.example.co.kr/scm-runners}/gradle:jdk8"
+    "${INTERNAL_IMAGE_REGISTRY:-registry.example.co.kr/scm-runners}/gradle:jdk17"
+    "${INTERNAL_IMAGE_REGISTRY:-registry.example.co.kr/scm-runners}/gradle:jdk21"
+    "${INTERNAL_IMAGE_REGISTRY:-registry.example.co.kr/scm-runners}/node:24"
+    "${INTERNAL_IMAGE_REGISTRY:-registry.example.co.kr/scm-runners}/shell-tools:2026.06"
+  )
+fi
 
+if [[ "${include_legacy}" == true ]]; then
+  images+=(
+    "${INTERNAL_IMAGE_REGISTRY:-registry.example.co.kr/scm-runners}/jdk:7"
+    "${INTERNAL_IMAGE_REGISTRY:-registry.example.co.kr/scm-runners}/maven:jdk7"
+    "${INTERNAL_IMAGE_REGISTRY:-registry.example.co.kr/scm-runners}/gradle:jdk7"
+  )
+fi
+
+overall_status=0
 for image in "${images[@]}"; do
-  safe_name="$(printf '%s' "${image}" | tr '/:@' '___')"
-  report="${TRIVY_REPORT_DIR}/${safe_name}.txt"
-  echo "Scanning ${image}"
-  docker run --rm \
-    -v /var/run/docker.sock:/var/run/docker.sock \
-    -v "${TRIVY_CACHE_DIR_ABS}:/root/.cache" \
-    -v "${TRIVY_REPORT_DIR_ABS}:/reports" \
-    "${TRIVY_IMAGE_REF}" image \
-      --platform linux/amd64 \
-      --severity CRITICAL,HIGH \
-      --ignore-unfixed \
-      --exit-code 1 \
-      --format table \
-      --output "/reports/$(basename "${report}")" \
-      "${image}"
+  if [[ "${image}" == *://* ]]; then
+    artifact_ref="${image}"
+  else
+    artifact_ref="${SCOUT_IMAGE_PREFIX}${image}"
+  fi
+
+  safe_name="$(printf '%s' "${image}" | tr '/:@' '____')"
+  quickview_report="${SCOUT_REPORT_DIR}/${safe_name}.quickview.txt"
+  cve_report="${SCOUT_REPORT_DIR}/${safe_name}.critical-high.txt"
+
+  echo "Scanning ${artifact_ref}"
+  if ! docker scout quickview \
+    --platform linux/amd64 \
+    --output "${quickview_report}" \
+    "${artifact_ref}"; then
+    printf '%s\tSCAN_ERROR\t%s\t%s\n' "${image}" "${quickview_report}" "${cve_report}" >>"${summary_report}"
+    overall_status=1
+    continue
+  fi
+
+  set +e
+  docker scout cves \
+    --platform linux/amd64 \
+    --only-severity critical,high \
+    --exit-code \
+    --output "${cve_report}" \
+    "${artifact_ref}"
+  cve_status=$?
+  set -e
+
+  case "${cve_status}" in
+    0) scan_status="PASS" ;;
+    2) scan_status="CRITICAL_OR_HIGH_FOUND"; overall_status=1 ;;
+    *) scan_status="SCAN_ERROR"; overall_status=1 ;;
+  esac
+  printf '%s\t%s\t%s\t%s\n' "${image}" "${scan_status}" "${quickview_report}" "${cve_report}" >>"${summary_report}"
 done
 
-echo "Image vulnerability scans completed. Reports: ${TRIVY_REPORT_DIR}"
+cat "${summary_report}"
+echo "Docker Scout image scans completed. Reports: ${SCOUT_REPORT_DIR}"
+exit "${overall_status}"

@@ -27,9 +27,10 @@ if [[ -z "${CODERAY_CLI_ARGS:-}" ]]; then
   exit 1
 fi
 
+read -r -a coderay_cli_args <<<"${CODERAY_CLI_ARGS}"
+
 set +e
-# shellcheck disable=SC2086
-"${coderay_cli}" ${CODERAY_CLI_ARGS} >"${log_file}" 2>&1
+"${coderay_cli}" "${coderay_cli_args[@]}" >"${log_file}" 2>&1
 status=$?
 set -e
 

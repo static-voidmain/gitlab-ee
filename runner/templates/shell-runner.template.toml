@@ -3,6 +3,8 @@ check_interval = 3
 shutdown_timeout = 30
 
 [[runners]]
+  url = "${GITLAB_EXTERNAL_URL}"
+  token = "${RUNNER_SHELL_AUTH_TOKEN}"
   output_limit = 8192
   limit = 1
   request_concurrency = 1
@@ -10,3 +12,4 @@ shutdown_timeout = 30
   shell = "bash"
   builds_dir = "/builds"
   cache_dir = "/cache"
+  debug_trace_disabled = true
