@@ -17,11 +17,13 @@ fi
 SCOUT_IMAGE_PREFIX="${SCOUT_IMAGE_PREFIX:-image://}"
 SCOUT_REPORT_DIR="${SCOUT_REPORT_DIR:-./reports/docker-scout}"
 include_legacy=false
+include_shell_tools=false
 requested_images=()
 
 for arg in "$@"; do
   case "${arg}" in
     --include-legacy) include_legacy=true ;;
+    --include-shell-tools) include_shell_tools=true ;;
     --) ;;
     -*) echo "ERROR: Unsupported option: ${arg}" >&2; exit 1 ;;
     *) requested_images+=("${arg}") ;;
@@ -61,8 +63,11 @@ else
     "${INTERNAL_IMAGE_REGISTRY:-registry.example.co.kr/scm-runners}/gradle:jdk17"
     "${INTERNAL_IMAGE_REGISTRY:-registry.example.co.kr/scm-runners}/gradle:jdk21"
     "${INTERNAL_IMAGE_REGISTRY:-registry.example.co.kr/scm-runners}/node:24"
-    "${INTERNAL_IMAGE_REGISTRY:-registry.example.co.kr/scm-runners}/shell-tools:2026.06"
   )
+fi
+
+if [[ "${include_shell_tools}" == true ]]; then
+  images+=("${INTERNAL_IMAGE_REGISTRY:-registry.example.co.kr/scm-runners}/shell-tools:2026.06")
 fi
 
 if [[ "${include_legacy}" == true ]]; then

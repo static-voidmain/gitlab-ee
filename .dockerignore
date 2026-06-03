@@ -1,0 +1,6 @@
+*
+!.dockerignore
+!vendor/
+!vendor/jdk7/
+!vendor/jdk7/*.tar.gz
+!vendor/jdk7/*.zip
