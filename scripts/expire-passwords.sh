@@ -17,5 +17,5 @@ fi
 docker compose exec -T \
   -e PASSWORD_EXPIRE_DAYS="${PASSWORD_EXPIRE_DAYS:-90}" \
   -e PASSWORD_EXPIRE_SSO_USERS="${PASSWORD_EXPIRE_SSO_USERS:-false}" \
-  -e PASSWORD_EXCEPTION_FILE="/opt/gitlab-bootstrap/password-expiration-exceptions.yml" \
+  -e PASSWORD_EXCEPTION_FILE="/opt/gitlab-config/password-expiration-exceptions.yml" \
   gitlab gitlab-rails runner /opt/gitlab-bootstrap/expire_passwords.rb

@@ -29,7 +29,7 @@ docker compose exec -T \
 echo "Scheduling password expiration baseline..."
 docker compose exec -T \
   -e PASSWORD_EXPIRE_DAYS="${PASSWORD_EXPIRE_DAYS:-90}" \
-  -e PASSWORD_EXCEPTION_FILE="/opt/gitlab-bootstrap/password-expiration-exceptions.yml" \
+  -e PASSWORD_EXCEPTION_FILE="/opt/gitlab-config/password-expiration-exceptions.yml" \
   gitlab gitlab-rails runner /opt/gitlab-bootstrap/expire_passwords.rb
 
 echo "Done."

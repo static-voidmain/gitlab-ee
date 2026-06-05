@@ -5,7 +5,7 @@ require 'json'
 require 'yaml'
 
 days = Integer(ENV.fetch('PASSWORD_EXPIRE_DAYS', '90'))
-exceptions_path = ENV.fetch('PASSWORD_EXCEPTION_FILE', '/opt/gitlab-bootstrap/password-expiration-exceptions.yml')
+exceptions_path = ENV.fetch('PASSWORD_EXCEPTION_FILE', '/opt/gitlab-config/password-expiration-exceptions.yml')
 now = Time.current
 next_expiration = days.days.from_now
 

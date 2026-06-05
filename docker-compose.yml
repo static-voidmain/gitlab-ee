@@ -92,7 +92,7 @@ services:
       - ${GITLAB_HOME:-/srv/gitlab-ee}/data:/var/opt/gitlab
       - ${GITLAB_HOME:-/srv/gitlab-ee}/backups:/var/opt/gitlab/backups
       - ./scripts/gitlab-rails:/opt/gitlab-bootstrap:ro
-      - ./config/password-expiration-exceptions.yml:/opt/gitlab-bootstrap/password-expiration-exceptions.yml:ro
+      - ./config/password-expiration-exceptions.yml:/opt/gitlab-config/password-expiration-exceptions.yml:ro
     healthcheck:
       test: ["CMD-SHELL", "curl --fail --silent http://127.0.0.1/-/health >/dev/null || exit 1"]
       interval: 30s
