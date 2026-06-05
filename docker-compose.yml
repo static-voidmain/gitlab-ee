@@ -6,7 +6,7 @@ services:
   gitlab:
     image: ${GITLAB_IMAGE:-gitlab/gitlab-ee:19.0.0-ee.0}
     container_name: ${GITLAB_CONTAINER_NAME:-gitlab-ee}
-    hostname: ${GITLAB_HOSTNAME:-gitlab.example.co.kr}
+    hostname: ${GITLAB_HOSTNAME:-igit.bluewalnut.co.kr}
     platform: linux/amd64
     restart: unless-stopped
     shm_size: "256m"
@@ -148,7 +148,7 @@ services:
         max-file: "5"
 
   gitlab-runner-shell:
-    image: ${GITLAB_SHELL_RUNNER_IMAGE:-registry.example.co.kr/scm-runners/gitlab-runner-shell:19.0.0}
+    image: ${GITLAB_SHELL_RUNNER_IMAGE:-bwc/gitlab-runner-shell:19.0.0}
     container_name: ${GITLAB_RUNNER_SHELL_CONTAINER_NAME:-gitlab-runner-shell}
     platform: linux/amd64
     restart: unless-stopped

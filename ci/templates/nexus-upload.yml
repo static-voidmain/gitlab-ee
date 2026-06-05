@@ -1,6 +1,6 @@
 nexus_upload:
   stage: publish
-  image: "${CI_RUNNER_JAVA_IMAGE:-registry.example.co.kr/scm-runners/maven:jdk21}"
+  image: "${CI_RUNNER_JAVA_IMAGE:-bwc/maven:jdk21}"
   tags:
     - docker
     - amd64

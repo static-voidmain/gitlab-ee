@@ -10,7 +10,7 @@ stages:
   - publish
 
 variables:
-  CI_RUNNER_JAVA_IMAGE: "registry.example.co.kr/scm-runners/maven:jdk21"
+  CI_RUNNER_JAVA_IMAGE: "bwc/maven:jdk21"
   CHECKSTYLE_CONFIG: "ci/checkstyle/company-checkstyle.xml"
   JACOCO_XML: "target/site/jacoco/jacoco.xml"
   MAVEN_CLI_OPTS: "-B -ntp"

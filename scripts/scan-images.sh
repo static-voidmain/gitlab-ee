@@ -16,6 +16,7 @@ fi
 
 SCOUT_IMAGE_PREFIX="${SCOUT_IMAGE_PREFIX:-image://}"
 SCOUT_REPORT_DIR="${SCOUT_REPORT_DIR:-./reports/docker-scout}"
+LOCAL_IMAGE_NAMESPACE="${LOCAL_IMAGE_NAMESPACE:-bwc}"
 include_legacy=false
 include_shell_tools=false
 requested_images=()
@@ -52,29 +53,29 @@ else
     "${GITLAB_IMAGE:-gitlab/gitlab-ee:19.0.0-ee.0}"
     "${GITLAB_RUNNER_IMAGE:-gitlab/gitlab-runner:alpine-v19.0.0}"
     "${GITLAB_DOCS_IMAGE:-registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/archives:19.0}"
-    "${GITLAB_SHELL_RUNNER_IMAGE:-registry.example.co.kr/scm-runners/gitlab-runner-shell:19.0.0}"
-    "${INTERNAL_IMAGE_REGISTRY:-registry.example.co.kr/scm-runners}/jdk:8"
-    "${INTERNAL_IMAGE_REGISTRY:-registry.example.co.kr/scm-runners}/jdk:17"
-    "${INTERNAL_IMAGE_REGISTRY:-registry.example.co.kr/scm-runners}/jdk:21"
-    "${INTERNAL_IMAGE_REGISTRY:-registry.example.co.kr/scm-runners}/maven:jdk8"
-    "${INTERNAL_IMAGE_REGISTRY:-registry.example.co.kr/scm-runners}/maven:jdk17"
-    "${INTERNAL_IMAGE_REGISTRY:-registry.example.co.kr/scm-runners}/maven:jdk21"
-    "${INTERNAL_IMAGE_REGISTRY:-registry.example.co.kr/scm-runners}/gradle:jdk8"
-    "${INTERNAL_IMAGE_REGISTRY:-registry.example.co.kr/scm-runners}/gradle:jdk17"
-    "${INTERNAL_IMAGE_REGISTRY:-registry.example.co.kr/scm-runners}/gradle:jdk21"
-    "${INTERNAL_IMAGE_REGISTRY:-registry.example.co.kr/scm-runners}/node:24"
+    "${GITLAB_SHELL_RUNNER_IMAGE:-${LOCAL_IMAGE_NAMESPACE}/gitlab-runner-shell:19.0.0}"
+    "${LOCAL_IMAGE_NAMESPACE}/jdk:8"
+    "${LOCAL_IMAGE_NAMESPACE}/jdk:17"
+    "${LOCAL_IMAGE_NAMESPACE}/jdk:21"
+    "${LOCAL_IMAGE_NAMESPACE}/maven:jdk8"
+    "${LOCAL_IMAGE_NAMESPACE}/maven:jdk17"
+    "${LOCAL_IMAGE_NAMESPACE}/maven:jdk21"
+    "${LOCAL_IMAGE_NAMESPACE}/gradle:jdk8"
+    "${LOCAL_IMAGE_NAMESPACE}/gradle:jdk17"
+    "${LOCAL_IMAGE_NAMESPACE}/gradle:jdk21"
+    "${LOCAL_IMAGE_NAMESPACE}/node:24"
   )
 fi
 
 if [[ "${include_shell_tools}" == true ]]; then
-  images+=("${INTERNAL_IMAGE_REGISTRY:-registry.example.co.kr/scm-runners}/shell-tools:2026.06")
+  images+=("${LOCAL_IMAGE_NAMESPACE}/shell-tools:2026.06")
 fi
 
 if [[ "${include_legacy}" == true ]]; then
   images+=(
-    "${INTERNAL_IMAGE_REGISTRY:-registry.example.co.kr/scm-runners}/jdk:7"
-    "${INTERNAL_IMAGE_REGISTRY:-registry.example.co.kr/scm-runners}/maven:jdk7"
-    "${INTERNAL_IMAGE_REGISTRY:-registry.example.co.kr/scm-runners}/gradle:jdk7"
+    "${LOCAL_IMAGE_NAMESPACE}/jdk:7"
+    "${LOCAL_IMAGE_NAMESPACE}/maven:jdk7"
+    "${LOCAL_IMAGE_NAMESPACE}/gradle:jdk7"
   )
 fi
 

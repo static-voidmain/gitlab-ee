@@ -57,7 +57,7 @@ docker compose --env-file .env.example config
 ./scripts/security-smoke-test.sh --static-only
 ```
 
-이미지 취약점 스캔은 Docker Desktop 또는 Docker Scout CLI 인증이 필요합니다. 기본값은 로컬 빌드 이미지를 우선 검사하고, registry 배포 후보 검증에서는 `SCOUT_IMAGE_PREFIX=registry://`를 사용합니다.
+이미지 취약점 스캔은 Docker Desktop 또는 Docker Scout CLI 인증이 필요합니다. 기본값은 로컬 Docker에 빌드된 이미지를 우선 검사하고, 원격 registry 배포 후보를 따로 검증할 때만 `SCOUT_IMAGE_PREFIX=registry://`를 사용합니다.
 
 ```bash
 ./scripts/scan-images.sh
@@ -88,7 +88,7 @@ Nexus 업로드 job은 수동 실행이며 `DEPLOY_ENV=dev`, `stg`, `prd` 중 �
 - GitLab Admin > Settings > Merge requests에서 `Coverage-Check` approval rule을 프로젝트별로 활성화합니다.
 - Docker runner는 protected runner로 만들고 untagged job 실행을 비활성화합니다.
 - Shell runner는 `secure-shell,coderay` 태그 전용으로 만들고 신뢰된 프로젝트에만 허용합니다.
-- Docker runner의 `allowed_images`는 사내 registry만 허용합니다. 사내 registry에는 Scout 검토가 끝난 digest를 승격하고 태그 변경 권한을 제한합니다.
+- Docker runner의 `allowed_images`는 로컬 `bwc/*:*` Runner 이미지로 제한합니다. Docker executor는 `if-not-present` pull 정책으로 로컬에 등록된 이미지를 우선 사용합니다.
 - `security/vulnerability-exceptions.yml`의 예외는 만료일과 승인 티켓 없이는 허용하지 않습니다.
 - Git HTTP Password auth를 허용하므로 TLS 강제, 로그인 실패 잠금, 90일 비밀번호 만료, 401/실패 로그인 로그 모니터링을 같이 운영합니다.
 - 백업 파일은 호스트 보관으로 끝내지 않고 암호화된 별도 저장소로 복제하며 정기 복구 훈련을 수행합니다.

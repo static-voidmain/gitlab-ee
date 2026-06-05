@@ -6,23 +6,24 @@ FROM ${BASE_IMAGE} AS jdk-dist
 FROM ${RUNTIME_BASE_IMAGE} AS runtime-base
 
 # 요구사항: JDK runner 이미지. 제약사항: amd64 빌드는 build-images.sh에서 --platform으로 강제한다.
-# 구현상세: 공통 OS 의존성 레이어를 JDK 복사 전에 만들어 버전별 이미지가 registry blob을 공유하게 한다.
+# 구현상세: 공통 OS 의존성 레이어를 JDK 복사 전에 만들어 버전별 이미지가 Docker layer를 공유하게 한다.
 ENV JAVA_HOME=/opt/java/openjdk \
     PATH=/opt/java/openjdk/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     LANG=C.UTF-8
-USER root
 RUN set -eux; \
     apt-get update; \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       binutils \
       ca-certificates \
+      curl \
       fontconfig \
+      jq \
       openssl \
       p11-kit \
       tzdata; \
     rm -rf /var/lib/apt/lists/* /usr/share/doc/* /usr/share/man/*; \
-    groupadd --gid 10001 ci; \
-    useradd --uid 10001 --gid 10001 --create-home --shell /bin/bash ci; \
+    groupadd --gid 10001 bwc; \
+    useradd --uid 10001 --gid 10001 --create-home --shell /bin/bash bwc; \
     mkdir -p /workspace; \
     chown -R 10001:10001 /workspace
 
@@ -39,5 +40,5 @@ RUN set -eux; \
 
 ENTRYPOINT ["/__cacert_entrypoint.sh"]
 CMD ["java", "-version"]
-USER 10001:10001
+USER bwc:bwc
 WORKDIR /workspace
