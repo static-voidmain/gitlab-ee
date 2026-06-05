@@ -36,6 +36,13 @@ if ! grep -q "rack_attack_git_basic_auth" docker-compose.yml; then
   exit 1
 fi
 
+if ! grep -Fq "puma['worker_processes']" docker-compose.yml ||
+  ! grep -Fq "sidekiq['concurrency']" docker-compose.yml ||
+  ! grep -Fq "prometheus_monitoring['enable'] = false" docker-compose.yml; then
+  echo "ERROR: GitLab performance/memory tuning settings are not configured." >&2
+  exit 1
+fi
+
 if grep -Eq '^[[:space:]]*enabled[[:space:]]*=[[:space:]]*true' ops/fail2ban/jail.d/gitlab-nginx-git-http.local; then
   echo "ERROR: Unsafe Git HTTP 401 Fail2Ban rule must remain disabled." >&2
   exit 1
