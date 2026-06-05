@@ -9,6 +9,8 @@ services:
     hostname: ${GITLAB_HOSTNAME:-igit.bluewalnut.co.kr}
     platform: linux/amd64
     restart: unless-stopped
+    mem_limit: ${GITLAB_MEMORY_LIMIT:-8g}
+    memswap_limit: ${GITLAB_MEMORY_SWAP_LIMIT:-10g}
     shm_size: "256m"
     env_file:
       # 구현상세: 운영에서는 .env를 사용하지만, 정적 검증은 .env.example만으로도 가능해야 한다.
@@ -44,17 +46,32 @@ services:
 
         # 보안: Git/Registry 인증 실패는 access log의 401 추정이 아니라 GitLab 내장 Rack Attack으로 차단한다.
         # 구현상세: 정상 Git HTTP 요청도 최초 401을 발생시키므로 외부 Fail2Ban 401 규칙은 사용하지 않는다.
-        git_basic_auth_ban_integer = lambda do |name, default|
+        gitlab_positive_integer = lambda do |name, default|
           value = Integer(ENV.fetch(name, default), 10)
           raise "#{name} must be greater than zero" unless value.positive?
           value
         end
+        gitlab_non_negative_integer = lambda do |name, default|
+          value = Integer(ENV.fetch(name, default), 10)
+          raise "#{name} must be zero or greater" if value.negative?
+          value
+        end
+        gitlab_boolean = lambda do |name, default|
+          case ENV.fetch(name, default).to_s.strip.downcase
+          when 'true', '1', 'yes', 'y'
+            true
+          when 'false', '0', 'no', 'n'
+            false
+          else
+            raise "#{name} must be true or false"
+          end
+        end
         gitlab_rails['rack_attack_git_basic_auth'] = {
-          'enabled' => ENV.fetch('GIT_BASIC_AUTH_BAN_ENABLED', 'true') == 'true',
+          'enabled' => gitlab_boolean.call('GIT_BASIC_AUTH_BAN_ENABLED', 'true'),
           'ip_whitelist' => ENV.fetch('GIT_BASIC_AUTH_BAN_IP_WHITELIST', '127.0.0.1').split(',').map(&:strip),
-          'maxretry' => git_basic_auth_ban_integer.call('GIT_BASIC_AUTH_BAN_MAX_RETRY', '5'),
-          'findtime' => git_basic_auth_ban_integer.call('GIT_BASIC_AUTH_BAN_FIND_TIME_SECONDS', '60'),
-          'bantime' => git_basic_auth_ban_integer.call('GIT_BASIC_AUTH_BAN_TIME_SECONDS', '3600')
+          'maxretry' => gitlab_positive_integer.call('GIT_BASIC_AUTH_BAN_MAX_RETRY', '5'),
+          'findtime' => gitlab_positive_integer.call('GIT_BASIC_AUTH_BAN_FIND_TIME_SECONDS', '60'),
+          'bantime' => gitlab_positive_integer.call('GIT_BASIC_AUTH_BAN_TIME_SECONDS', '3600')
         }
 
         # 운영: Asia/Seoul 기준 로그/감사 추적과 백업 보존 기간을 명시한다.
@@ -62,11 +79,50 @@ services:
         gitlab_rails['backup_path'] = '/var/opt/gitlab/backups'
         gitlab_rails['backup_keep_time'] = ENV.fetch('GITLAB_BACKUP_KEEP_SECONDS', '1209600').to_i
 
+        # 성능: Ruby 메모리 사용량을 낮추기 위해 Puma/Sidekiq 병렬도를 명시적으로 제한한다.
+        # 운영상 동시 접속이나 CI 이벤트가 증가하면 worker/concurrency를 올리되 PostgreSQL/Redis 연결 수를 함께 확인한다.
+        puma['worker_processes'] = gitlab_non_negative_integer.call('GITLAB_PUMA_WORKER_PROCESSES', '2')
+        puma['min_threads'] = gitlab_positive_integer.call('GITLAB_PUMA_MIN_THREADS', '4')
+        puma['max_threads'] = gitlab_positive_integer.call('GITLAB_PUMA_MAX_THREADS', '4')
+        raise 'GITLAB_PUMA_MIN_THREADS must be less than or equal to GITLAB_PUMA_MAX_THREADS' if puma['min_threads'] > puma['max_threads']
+        puma['per_worker_max_memory_mb'] = gitlab_positive_integer.call('GITLAB_PUMA_PER_WORKER_MAX_MEMORY_MB', '1200')
+        sidekiq['concurrency'] = gitlab_positive_integer.call('GITLAB_SIDEKIQ_CONCURRENCY', '10')
+
+        # 성능: jemalloc이 해제된 페이지를 오래 붙잡지 않게 하여 Ruby RSS 증가를 완화한다.
+        gitlab_allocator_env = {
+          'MALLOC_CONF' => ENV.fetch('GITLAB_MALLOC_CONF', 'dirty_decay_ms:1000,muzzy_decay_ms:1000')
+        }
+        gitlab_rails['env'] = gitlab_allocator_env
+        gitaly['env'] = gitlab_allocator_env.merge({
+          'GITALY_COMMAND_SPAWN_MAX_PARALLEL' => ENV.fetch('GITALY_COMMAND_SPAWN_MAX_PARALLEL', '2')
+        })
+
+        # 성능: Git HTTP clone/fetch가 큰 repository에서 Gitaly를 과점하지 않도록 repository 단위 병렬도를 제한한다.
+        if gitlab_boolean.call('GITALY_CONCURRENCY_LIMITS_ENABLED', 'true')
+          gitaly['configuration'] = {
+            concurrency: [
+              {
+                rpc: '/gitaly.SmartHTTPService/PostUploadPackWithSidechannel',
+                max_per_repo: gitlab_positive_integer.call('GITALY_SMARTHTTP_UPLOAD_PACK_MAX_PER_REPO', '6'),
+                max_queue_wait: ENV.fetch('GITALY_SMARTHTTP_UPLOAD_PACK_MAX_QUEUE_WAIT', '1s'),
+                max_queue_size: gitlab_positive_integer.call('GITALY_SMARTHTTP_UPLOAD_PACK_MAX_QUEUE_SIZE', '10')
+              },
+              {
+                rpc: '/gitaly.SmartHTTPService/PostReceivePack',
+                max_per_repo: gitlab_positive_integer.call('GITALY_SMARTHTTP_RECEIVE_PACK_MAX_PER_REPO', '3'),
+                max_queue_wait: ENV.fetch('GITALY_SMARTHTTP_RECEIVE_PACK_MAX_QUEUE_WAIT', '1s'),
+                max_queue_size: gitlab_positive_integer.call('GITALY_SMARTHTTP_RECEIVE_PACK_MAX_QUEUE_SIZE', '10')
+              }
+            ]
+          }
+        end
+
         # 운영: GitLab 내장 컨테이너 registry는 현재 Harbor 전환 예정이므로 기본 비활성화한다.
         registry['enable'] = false
+        gitlab_kas['enable'] = gitlab_boolean.call('GITLAB_KAS_ENABLE', 'false')
 
         # 운영: SMTP는 사내 릴레이가 있을 때만 활성화한다. 비밀값은 .env로만 주입한다.
-        gitlab_rails['smtp_enable'] = ENV.fetch('SMTP_ENABLE', 'false') == 'true'
+        gitlab_rails['smtp_enable'] = gitlab_boolean.call('SMTP_ENABLE', 'false')
         if gitlab_rails['smtp_enable']
           gitlab_rails['smtp_address'] = ENV.fetch('SMTP_ADDRESS')
           gitlab_rails['smtp_port'] = ENV.fetch('SMTP_PORT', '587').to_i
@@ -74,9 +130,22 @@ services:
           gitlab_rails['smtp_password'] = ENV['SMTP_PASSWORD']
           gitlab_rails['smtp_domain'] = ENV.fetch('SMTP_DOMAIN', ENV.fetch('GITLAB_HOSTNAME', 'gitlab.example.co.kr'))
           gitlab_rails['smtp_authentication'] = ENV.fetch('SMTP_AUTHENTICATION', 'login')
-          gitlab_rails['smtp_enable_starttls_auto'] = ENV.fetch('SMTP_ENABLE_STARTTLS_AUTO', 'true') == 'true'
+          gitlab_rails['smtp_enable_starttls_auto'] = gitlab_boolean.call('SMTP_ENABLE_STARTTLS_AUTO', 'true')
           gitlab_rails['gitlab_email_from'] = ENV.fetch('GITLAB_EMAIL_FROM')
           gitlab_rails['gitlab_email_reply_to'] = ENV.fetch('GITLAB_EMAIL_REPLY_TO', ENV.fetch('GITLAB_EMAIL_FROM'))
+        end
+
+        # 성능: 외부 관측성 스택을 쓰는 단일 호스트에서는 내장 Prometheus/exporter를 꺼서 메모리를 절감한다.
+        if gitlab_boolean.call('GITLAB_DISABLE_BUNDLED_MONITORING', 'true')
+          alertmanager['enable'] = false
+          gitlab_exporter['enable'] = false
+          node_exporter['enable'] = false
+          postgres_exporter['enable'] = false
+          prometheus['enable'] = false
+          prometheus_monitoring['enable'] = false
+          puma['exporter_enabled'] = false
+          redis_exporter['enable'] = false
+          sidekiq['metrics_enabled'] = false
         end
 
         # 관측성: 컨테이너 로그는 Docker logging driver로 수집하고 GitLab JSON 로그는 /var/log/gitlab에 보존한다.

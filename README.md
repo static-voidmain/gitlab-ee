@@ -12,6 +12,7 @@
 - Docker runner는 표준 빌드에 사용하고, Shell runner는 protected/tagged CodeRay 작업 전용으로 제한합니다.
 - Docker runner는 단일 호스트 자원 고갈을 막기 위해 전체 최대 10개 job을 병렬 처리합니다. Shell runner는 고위험 executor이므로 1개 job으로 제한합니다.
 - Git/Registry HTTP 인증 실패 IP 차단은 GitLab 내장 Rack Attack을 사용합니다. Nginx access log의 `401` 기반 Fail2Ban 예시는 정상 Git 요청을 오탐하므로 비활성화했습니다.
+- GitLab Ruby RSS 증가를 낮추기 위해 Puma worker/thread, Sidekiq concurrency, jemalloc decay, 내장 Prometheus/exporter 비활성화 값을 `.env`로 제어합니다.
 
 ## 핵심 코드/스크립트 구현
 
@@ -47,6 +48,37 @@ docker compose up -d gitlab-runner-docker gitlab-runner-shell
 `register-runners.sh`는 기존 runtime `config.toml`을 덮어쓰지 않습니다. GitLab Runner가 자동 회전 토큰을 저장할 수 있으므로 교체 전 기존 파일을 별도로 검토합니다.
 
 7. 운영 cron 예시는 `ops/cron.d/gitlab-ee`를 참고해 root crontab 또는 운영 표준 스케줄러에 등록합니다.
+
+## 성능 튜닝 가이드
+
+기본 프로파일은 단일 호스트에서 GitLab Rails(Ruby) 메모리를 낮추는 방향입니다. GitLab 공식 요구사항은 일반 운영 기준 16GB RAM, 일부 제약 환경은 8GB 이상을 안내하며, Puma worker와 thread는 CPU/RAM 및 PostgreSQL 연결 수에 영향을 줍니다. 메모리가 부족한 경우 GitLab 공식 memory-constrained 설정은 Puma single mode(`GITLAB_PUMA_WORKER_PROCESSES=0`)도 제시하지만, 운영 처리량과 phased restart 제약이 있으므로 검증 환경에서만 먼저 확인합니다.
+
+주요 조정 값:
+
+- `GITLAB_MEMORY_LIMIT=8g`, `GITLAB_MEMORY_SWAP_LIMIT=10g`: GitLab 컨테이너의 Docker cgroup 상한입니다.
+- `GITLAB_PUMA_WORKER_PROCESSES=2`, `GITLAB_PUMA_MAX_THREADS=4`: Web 요청 처리량과 Ruby RSS의 핵심 레버입니다.
+- `GITLAB_PUMA_PER_WORKER_MAX_MEMORY_MB=1200`: Puma worker RSS watchdog 기준입니다. 너무 낮으면 worker restart가 잦아져 응답성이 떨어집니다.
+- `GITLAB_SIDEKIQ_CONCURRENCY=10`: background job 동시 처리량을 낮춰 Sidekiq Ruby 메모리와 Redis/DB 연결 수를 줄입니다.
+- `GITLAB_DISABLE_BUNDLED_MONITORING=true`: 외부 관측성 스택을 전제로 내장 Prometheus/exporter를 꺼서 메모리를 절약합니다.
+- `GITALY_*`: 큰 repository clone/fetch/push가 단일 호스트 자원을 과점하지 않도록 repository 단위 동시성을 제한합니다.
+
+변경 반영:
+
+```bash
+docker compose --env-file .env config
+docker compose up -d --force-recreate gitlab
+docker compose logs -f gitlab
+```
+
+메모리 확인:
+
+```bash
+docker stats --no-stream gitlab-ee
+docker compose exec gitlab bash -lc "ps -eo pid,comm,rss,args --sort=-rss | head -20"
+docker compose exec gitlab bash -lc "grep -i 'rss memory limit exceeded' /var/log/gitlab/gitlab-rails/application_json.log || true"
+```
+
+공식 참고 문서: [GitLab installation requirements](https://docs.gitlab.com/install/requirements/), [memory-constrained environments](https://docs.gitlab.com/omnibus/settings/memory_constrained_envs/), [Puma settings](https://docs.gitlab.com/administration/operations/puma/), [Sidekiq concurrency](https://docs.gitlab.com/administration/sidekiq/extra_sidekiq_processes/), [Gitaly concurrency limiting](https://docs.gitlab.com/administration/gitaly/concurrency_limiting/).
 
 ## 테스트 및 배포 가이드
 
