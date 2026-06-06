@@ -1,0 +1,8 @@
+# VMware 2 vCPU / 6 GiB RAM test override.
+# 운영 서버에서는 이 override를 사용하지 않고 docker-compose.yml만 사용한다.
+# GitLab EE 본체 platform은 scripts/prepare-platform-env.sh가 로컬 .env에 생성한다.
+services:
+  gitlab:
+    cpus: ${GITLAB_CPU_LIMIT:-2}
+    mem_limit: ${GITLAB_MEMORY_LIMIT:-5g}
+    memswap_limit: ${GITLAB_MEMORY_SWAP_LIMIT:-6g}
