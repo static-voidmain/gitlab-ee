@@ -30,10 +30,42 @@ validate_token() {
 validate_url() {
   local name="$1"
   local value="$2"
-  if [[ "${value}" != https://* ]]; then
-    echo "ERROR: ${name} must use https://." >&2
+
+  if [[ -z "${value}" ]]; then
+    echo "ERROR: ${name} must not be empty." >&2
     exit 1
   fi
+
+  if [[ "${value}" =~ ^https://[^/:[:space:]]+(:[0-9]+)?(/.*)?$ ]]; then
+    return 0
+  fi
+
+  if [[ "${value}" =~ ^http://(localhost|127\.0\.0\.1)(:[0-9]+)?(/.*)?$ ]]; then
+    return 0
+  fi
+
+  if [[ "${value}" == http://* ]]; then
+    echo "ERROR: ${name} may use http:// only for localhost or 127.0.0.1 smoke tests." >&2
+    exit 1
+  fi
+
+  echo "ERROR: ${name} must use https://, or http://localhost for smoke tests." >&2
+  exit 1
+}
+
+validate_runner_url() {
+  local value="$1"
+  validate_url GITLAB_EXTERNAL_URL "${value}"
+
+  if [[ "${value}" =~ ^http://(localhost|127\.0\.0\.1)(:[0-9]+)?(/.*)?$ ]]; then
+    echo "WARNING: GITLAB_EXTERNAL_URL=${value} is valid only for host-local smoke tests." >&2
+    echo "WARNING: Runner containers cannot reach GitLab through their own localhost; use this only when validating local config generation." >&2
+  fi
+}
+
+validate_tokens() {
+  validate_token RUNNER_DOCKER_AUTH_TOKEN "${RUNNER_DOCKER_AUTH_TOKEN:-}"
+  validate_token RUNNER_SHELL_AUTH_TOKEN "${RUNNER_SHELL_AUTH_TOKEN:-}"
 }
 
 install_runner_config() {
@@ -52,18 +84,23 @@ install_runner_config() {
   chmod 600 "${config_file}"
 }
 
-validate_token RUNNER_DOCKER_AUTH_TOKEN "${RUNNER_DOCKER_AUTH_TOKEN:-}"
-validate_token RUNNER_SHELL_AUTH_TOKEN "${RUNNER_SHELL_AUTH_TOKEN:-}"
-validate_url GITLAB_EXTERNAL_URL "${GITLAB_EXTERNAL_URL:-}"
+main() {
+  validate_tokens
+  validate_runner_url "${GITLAB_EXTERNAL_URL:-}"
 
-install_runner_config \
-  "${RUNNER_DOCKER_CONFIG_HOME:-./runtime/gitlab-runner/docker}" \
-  runner/templates/docker-runner.template.toml
+  install_runner_config \
+    "${RUNNER_DOCKER_CONFIG_HOME:-./runtime/gitlab-runner/docker}" \
+    runner/templates/docker-runner.template.toml
 
-install_runner_config \
-  "${RUNNER_SHELL_CONFIG_HOME:-./runtime/gitlab-runner/shell}" \
-  runner/templates/shell-runner.template.toml
+  install_runner_config \
+    "${RUNNER_SHELL_CONFIG_HOME:-./runtime/gitlab-runner/shell}" \
+    runner/templates/shell-runner.template.toml
 
-echo "Runner configs provisioned."
-echo "Start runners with: docker compose up -d gitlab-runner-docker gitlab-runner-shell"
-echo "Confirm protected/tagged settings in GitLab UI."
+  echo "Runner configs provisioned."
+  echo "Start runners with: docker compose up -d gitlab-runner-docker gitlab-runner-shell"
+  echo "Confirm protected/tagged settings in GitLab UI."
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi

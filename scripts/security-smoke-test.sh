@@ -62,6 +62,12 @@ if ! grep -Eq '^[[:space:]]*cpus:[[:space:]]*2' <<<"${vmware_config}" ||
   exit 1
 fi
 
+if ! grep -Fq 'GITLAB_EXTERNAL_URL=http://localhost:8080' .env.vmware-2c6g.example ||
+  ! grep -Fq 'GITLAB_DOCS_EXTERNAL_URL=http://localhost:4000' .env.vmware-2c6g.example; then
+  echo "ERROR: VMware smoke profile must expose GitLab and Docs through localhost URLs." >&2
+  exit 1
+fi
+
 if grep -q '/srv/gitlab-ee' <<<"${vmware_config}" ||
   ! grep -Eq 'runtime[/\\]+gitlab-ee' <<<"${vmware_config}"; then
   echo "ERROR: VMware test profile must use workspace-local runtime/gitlab-ee bind mounts." >&2
@@ -151,6 +157,15 @@ if [[ -n "${docker_arch_normalized}" && "${gitlab_container_arch}" != "${docker_
   echo "ERROR: GitLab EE container architecture must match Docker host architecture. Host=${docker_arch_normalized}, container=${gitlab_container_arch}." >&2
   exit 1
 fi
+
+gitlab_http_port="$(env_value GITLAB_HTTP_PORT 8080)"
+gitlab_resource_profile="$(env_value GITLAB_RESOURCE_PROFILE default)"
+gitlab_external_url="$(env_value GITLAB_EXTERNAL_URL "http://localhost:${gitlab_http_port}")"
+if [[ "${gitlab_resource_profile}" == "vmware_2c_6g" && "${gitlab_external_url}" != "http://localhost:${gitlab_http_port}" ]]; then
+  echo "ERROR: VMware smoke profile must set GITLAB_EXTERNAL_URL=http://localhost:${gitlab_http_port}." >&2
+  exit 1
+fi
+curl --fail --silent --max-time 20 "http://localhost:${gitlab_http_port}/users/sign_in" >/dev/null
 
 gitlab_docs_bind="$(env_value GITLAB_DOCS_BIND 127.0.0.1)"
 gitlab_docs_port="$(env_value GITLAB_DOCS_PORT 4000)"
